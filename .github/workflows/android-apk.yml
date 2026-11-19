@@ -1,0 +1,48 @@
+name: ORANGE Android APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: ORANGE-V1/package-lock.json
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
+      - name: Install dependencies
+        working-directory: ORANGE-V1
+        run: npm install --no-audit --no-fund
+      - name: Generate Android project
+        working-directory: ORANGE-V1
+        env:
+          CI: '1'
+        run: npx expo prebuild --platform android --clean --no-install
+      - name: Build release APK
+        working-directory: ORANGE-V1/android
+        run: ./gradlew --no-daemon assembleRelease
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ORANGE-Android-APK
+          path: ORANGE-V1/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
