@@ -45,7 +45,7 @@ type Story = {
   id: string; user_id: string; media_url: string; media_type: string; caption: string;
   expires_at: string; owner?: Profile;
 };
-type Note = { user_id: string; body: string; color: string; expires_at: string; owner?: Profile };
+type Note = { user_id: string; body: string; color: string; expires_at: string; updated_at?: string; owner?: Profile };
 
 function ping() { Haptics.selectionAsync().catch(() => {}); }
 function shortTime(value?: string) {
@@ -130,7 +130,7 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState('');
   const [showStickers, setShowStickers] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('signup');
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [wantedUsername, setWantedUsername] = useState('');
