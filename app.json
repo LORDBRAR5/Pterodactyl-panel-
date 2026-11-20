@@ -7,8 +7,8 @@
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "android": {
-      "package": "com.lordbrar.orange",
-      "versionCode": 2,
+      "package": "com.orange.social",
+      "versionCode": 3,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "RECORD_AUDIO",
