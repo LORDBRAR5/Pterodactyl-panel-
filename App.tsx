@@ -39,7 +39,7 @@ type Message = {
 };
 type Conversation = {
   id: string; kind: 'direct' | 'group'; title?: string | null; avatar_url?: string | null;
-  members: Profile[]; last?: Message;
+  members: Profile[]; last?: Message; updated_at?: string; created_at?: string;
 };
 type Story = {
   id: string; user_id: string; media_url: string; media_type: string; caption: string;
