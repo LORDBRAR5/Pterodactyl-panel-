@@ -1,54 +1,73 @@
 name: ORANGE Android APK
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
 permissions:
   contents: read
   actions: read
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Extract ORANGE source
-        run: unzip -q ORANGE-V1.zip -d .
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Configure Android SDK
+          cache: npm
+
+      - name: Install Android SDK packages
         run: |
           echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
           echo "/usr/local/lib/android/sdk/platform-tools" >> "$GITHUB_PATH"
           echo "/usr/local/lib/android/sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-      - name: Install Android SDK packages
-        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
-      - name: Install dependencies
-        working-directory: ORANGE-V1
-        run: |
-          npm install --save-dev babel-preset-expo@~54.0.0 --no-audit --no-fund
-          npm install --no-audit --no-fund
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
+
+      - name: Install JavaScript dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Align Expo native package versions
+        run: npx expo install --fix
+
+      - name: Validate app config
+        run: npx expo config --type public
+
       - name: Generate Android project
-        working-directory: ORANGE-V1
         env:
           CI: '1'
         run: npx expo prebuild --platform android --clean --no-install
+
       - name: Build release APK
-        working-directory: ORANGE-V1/android
-        run: ./gradlew --no-daemon assembleRelease
+        working-directory: android
+        run: ./gradlew --no-daemon --stacktrace assembleRelease
+
+      - name: Verify APK architecture and signature
+        run: |
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          apksigner verify --verbose "$APK"
+          unzip -l "$APK" | grep -E "lib/(armeabi-v7a|arm64-v8a)/"
+          aapt dump badging "$APK" | grep -E "sdkVersion:'24'|targetSdkVersion:'36'"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ORANGE-Android-APK
-          path: ORANGE-V1/android/app/build/outputs/apk/release/*.apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 14

@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "ORANGE",
+    "slug": "orange",
+    "version": "2.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "android": {
+      "package": "com.lordbrar.orange",
+      "versionCode": 2,
+      "minSdkVersion": 24,
+      "softwareKeyboardLayoutMode": "pan",
+      "permissions": ["RECORD_AUDIO", "CAMERA"]
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24,
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "buildArchs": ["armeabi-v7a", "arm64-v8a"],
+            "enableMinifyInReleaseBuilds": false
+          }
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow ORANGE to record voice notes.",
+          "recordAudioAndroid": true,
+          "enableBackgroundRecording": false,
+          "enableBackgroundPlayback": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow ORANGE to share photos in chats and Instants.",
+          "cameraPermission": "Allow ORANGE to capture profile and story photos.",
+          "microphonePermission": "Allow ORANGE to capture story videos."
+        }
+      ]
+    ]
+  }
+}
