@@ -289,6 +289,31 @@ export default function App() {
   }, [session?.user.id, loadData]);
 
   useEffect(() => {
+    if (!user?.id) return;
+    const channel = supabase.channel('orange-inbox-' + user.id)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+        const incoming = payload.new as Message;
+        if (incoming.sender_id === user.id) return;
+        setConversations(prev => {
+          if (!prev.some(chat => chat.id === incoming.conversation_id)) return prev;
+          return prev.map(chat => chat.id === incoming.conversation_id ? { ...chat, last: incoming, updated_at: incoming.created_at } : chat)
+            .sort((a, b) => new Date(b.last?.created_at || b.updated_at || b.created_at || 0).getTime() - new Date(a.last?.created_at || a.updated_at || a.created_at || 0).getTime());
+        });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const channel = supabase.channel('orange-social-' + user.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stories' }, () => { loadData(user.id).catch(() => {}); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, () => { loadData(user.id).catch(() => {}); })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id, loadData]);
+
+  useEffect(() => {
     if (!selectedChat || !user) return;
     let active = true;
     supabase.from('messages').select('*').eq('conversation_id', selectedChat.id).order('created_at', { ascending: true }).limit(120)
