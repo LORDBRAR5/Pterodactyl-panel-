@@ -36,7 +36,7 @@ type Profile = {
 type Message = {
   id: string; conversation_id: string; sender_id: string; body: string;
   created_at: string; message_type?: string; media_path?: string | null;
-  duration_seconds?: number | null; metadata?: Record<string, any>;
+  duration_seconds?: number | null; edited_at?: string | null; metadata?: Record<string, any>;
 };
 type Conversation = {
   id: string; kind: 'direct' | 'group'; title?: string | null; avatar_url?: string | null;
