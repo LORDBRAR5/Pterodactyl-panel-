@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Animated, FlatList, Image, KeyboardAvoidingView,
+  ActivityIndicator, Alert, Animated, FlatList, Image, KeyboardAvoidingView, Linking,
   Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Switch,
   Text, TextInput, View, Dimensions
 } from 'react-native';
@@ -14,9 +14,9 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from './src/lib/supabase';
 
 const C = {
-  bg: '#090909', panel: '#141414', panel2: '#1B1B1B', line: '#282828',
-  orange: '#FF7A18', orange2: '#FF9B52', white: '#F8F7F5',
-  muted: '#92908E', green: '#55D6A0', red: '#FF6666'
+  bg: '#08090B', panel: '#111318', panel2: '#191C23', line: '#292D36',
+  orange: '#FF842B', orange2: '#FFB06B', white: '#F7F8FA',
+  muted: '#9298A4', green: '#55D6A0', red: '#FF6666'
 };
 const STICKERS = ['🧡','😂','🥹','🔥','✨','😎','🫶','🤍','💀','🥳','🌙','🐈','🍊','💯','👀','🎉'];
 const FRAMES = [
@@ -150,6 +150,50 @@ export default function App() {
   const listRef = useRef<FlatList<Message>>(null);
   const user = session?.user;
 
+  const handleAuthUrl = useCallback(async (url: string) => {
+    try {
+      const parsed = new URL(url);
+      const errorDescription = parsed.searchParams.get('error_description');
+      const errorCode = parsed.searchParams.get('error');
+      if (errorDescription || errorCode) {
+        Alert.alert('Verification link issue', decodeURIComponent((errorDescription || errorCode || 'The link could not be verified.').replace(/\\+/g, ' ')));
+        return;
+      }
+      const code = parsed.searchParams.get('code');
+      const tokenHash = parsed.searchParams.get('token_hash');
+      const type = parsed.searchParams.get('type');
+      if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) throw error;
+        Alert.alert('Email verified', 'Your ORANGE account is ready.');
+        return;
+      }
+      if (tokenHash) {
+        const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: (type || 'signup') as any });
+        if (error) throw error;
+        Alert.alert('Email verified', 'Your ORANGE account is ready.');
+        return;
+      }
+      const hash = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+      const accessToken = hash.get('access_token');
+      const refreshToken = hash.get('refresh_token');
+      if (accessToken && refreshToken) {
+        const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+        if (error) throw error;
+        Alert.alert('Email verified', 'Your ORANGE account is ready.');
+      }
+    } catch (e: any) {
+      Alert.alert('Could not verify email', e?.message || 'Open the newest verification email and try again.');
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    Linking.getInitialURL().then(url => { if (active && url) handleAuthUrl(url); }).catch(() => {});
+    const subscription = Linking.addEventListener('url', event => handleAuthUrl(event.url));
+    return () => { active = false; subscription.remove(); };
+  }, [handleAuthUrl]);
+
   const loadData = useCallback(async (uid: string) => {
     const profileRes = await supabase.from('profiles')
       .select('id,username,display_name,avatar_url,bio,accent_color,frame_id,animated_pfp,profile_effect,status_text')
@@ -228,15 +272,26 @@ export default function App() {
       if (authMode === 'signup') {
         const { data, error } = await supabase.auth.signUp({
           email: email.trim().toLowerCase(), password,
-          options: { data: { username: wantedUsername.trim().toLowerCase(), display_name: displayName.trim() || wantedUsername.trim() } }
+          options: { emailRedirectTo: 'orange://auth/callback', data: { username: wantedUsername.trim().toLowerCase(), display_name: displayName.trim() || wantedUsername.trim() } }
         });
         if (error) throw error;
-        if (!data.session) Alert.alert('Check your email', 'Confirm your email, then sign in to ORANGE.');
+        if (!data.session) Alert.alert('Verify your email', 'We sent a confirmation link. Open it on this phone; it should return to ORANGE automatically.');
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim().toLowerCase(), password });
         if (error) throw error;
       }
     } catch (e: any) { Alert.alert('Could not continue', e.message || 'Please try again.'); }
+    finally { setAuthBusy(false); }
+  };
+
+  const resetPassword = async () => {
+    if (!email.trim()) return Alert.alert('Email required', 'Enter your account email first.');
+    setAuthBusy(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo: 'orange://auth/callback' });
+      if (error) throw error;
+      Alert.alert('Reset link sent', 'Check your inbox for a password reset link.');
+    } catch (e: any) { Alert.alert('Could not send reset link', e.message || 'Please try again.'); }
     finally { setAuthBusy(false); }
   };
 
@@ -419,6 +474,7 @@ export default function App() {
           <Text style={styles.fieldLabel}>PASSWORD</Text>
           <TextInput value={password} onChangeText={setPassword} secureTextEntry placeholder="At least 8 characters" placeholderTextColor="#686868" style={styles.field} />
           <Action label={authBusy ? 'PLEASE WAIT…' : authMode === 'signup' ? 'CREATE ACCOUNT  →' : 'SIGN IN  →'} onPress={doAuth} />
+          {authMode === 'login' && <Pressable onPress={resetPassword} disabled={authBusy} style={{ paddingTop: 15, alignItems: 'center' }}><Text style={{ color: C.orange2, fontSize: 12, fontWeight: '700' }}>Forgot password?</Text></Pressable>}
           <Pressable onPress={() => setAuthMode(authMode === 'signup' ? 'login' : 'signup')} style={{ padding: 14, alignItems: 'center' }}>
             <Text style={styles.muted}>{authMode === 'signup' ? 'Already have an account? ' : 'New to ORANGE? '}<Text style={{ color: C.orange, fontWeight: '800' }}>{authMode === 'signup' ? 'Sign in' : 'Create account'}</Text></Text>
           </Pressable>
@@ -470,7 +526,7 @@ export default function App() {
     <View style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <View style={styles.topBar}>
-        <View><Text style={styles.topEyebrow}>YOUR EVERYDAY SPACE</Text><Text style={styles.topTitle}>ORANGE<Text style={{ color: C.orange }}>.</Text></Text></View>
+        <View><Text style={styles.topEyebrow}>A LITTLE CLOSER, EVERY DAY</Text><Text style={styles.topTitle}>ORANGE<Text style={{ color: C.orange }}>.</Text></Text></View>
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <Pressable onPress={() => setNewChatOpen(true)} style={styles.topIcon}><Text style={styles.topIconText}>⌕</Text></Pressable>
           <Pressable onPress={() => setGroupOpen(true)} style={styles.topIcon}><Text style={styles.topIconText}>＋</Text></Pressable>
@@ -579,21 +635,21 @@ const styles = StyleSheet.create({
   logoMarkText: { color: '#17100A', fontSize: 34, fontWeight: '900' },
   brand: { color: C.white, fontSize: 30, fontWeight: '900', letterSpacing: 5, textAlign: 'center' },
   tagline: { color: C.muted, textAlign: 'center', marginTop: 8, marginBottom: 28, fontSize: 13 },
-  authCard: { backgroundColor: '#141414', borderColor: '#282828', borderWidth: 1, borderRadius: 24, padding: 20 },
+  authCard: { backgroundColor: '#14171D', borderColor: '#30343E', borderWidth: 1, borderRadius: 28, padding: 22, shadowColor: '#FF842B', shadowOpacity: 0.10, shadowRadius: 28, shadowOffset: { width: 0, height: 12 }, elevation: 8 },
   sectionTitle: { color: C.white, fontSize: 17, fontWeight: '800' },
   fieldLabel: { color: '#A5A09B', fontSize: 10, letterSpacing: 1.5, fontWeight: '800', marginTop: 16, marginBottom: 7 },
-  field: { backgroundColor: '#0D0D0D', borderWidth: 1, borderColor: '#303030', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13, color: C.white, fontSize: 14 },
-  action: { backgroundColor: C.orange, paddingVertical: 14, paddingHorizontal: 18, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginTop: 16, minHeight: 46 },
+  field: { backgroundColor: '#0D1015', borderWidth: 1, borderColor: '#343A45', borderRadius: 15, paddingHorizontal: 15, paddingVertical: 14, color: C.white, fontSize: 14 },
+  action: { backgroundColor: C.orange, paddingVertical: 15, paddingHorizontal: 18, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginTop: 17, minHeight: 50, shadowColor: C.orange, shadowOpacity: 0.18, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 4 },
   actionQuiet: { backgroundColor: '#252525', borderWidth: 1, borderColor: '#383838' },
   actionSmall: { minHeight: 36, paddingVertical: 9, paddingHorizontal: 13, marginTop: 0 },
   actionText: { color: '#17100A', fontWeight: '900', letterSpacing: 0.8, fontSize: 13 },
   footnote: { color: '#77716B', fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: 14 },
-  topBar: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  topBar: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#0B0D11' },
   topEyebrow: { color: C.muted, fontSize: 9, letterSpacing: 2, fontWeight: '700' },
   topTitle: { color: C.white, fontSize: 25, fontWeight: '900', letterSpacing: 3 },
-  topIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: C.panel2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line },
+  topIcon: { width: 44, height: 44, borderRadius: 16, backgroundColor: '#191D25', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#303642' },
   topIconText: { color: C.orange, fontSize: 24, fontWeight: '500' },
-  searchPill: { height: 42, borderRadius: 14, marginHorizontal: 18, backgroundColor: C.panel, borderWidth: 1, borderColor: C.line, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, marginBottom: 16 },
+  searchPill: { height: 48, borderRadius: 17, marginHorizontal: 18, backgroundColor: '#141820', borderWidth: 1, borderColor: '#2D333E', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, marginBottom: 18 },
   storiesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20 },
   orangeLink: { color: C.orange, fontSize: 12, fontWeight: '800' },
   storyStrip: { paddingHorizontal: 16, paddingTop: 13, paddingBottom: 18, gap: 14 },
@@ -602,7 +658,7 @@ const styles = StyleSheet.create({
   storyRing: { borderWidth: 2, borderColor: C.orange, borderRadius: 36, padding: 2 },
   storyName: { color: '#C8C4C0', fontSize: 10, marginTop: 6, maxWidth: 68 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 6, paddingBottom: 6 },
-  chatRow: { flexDirection: 'row', alignItems: 'center', paddingLeft: 18, paddingRight: 20, minHeight: 78 },
+  chatRow: { flexDirection: 'row', alignItems: 'center', paddingLeft: 18, paddingRight: 20, minHeight: 84, backgroundColor: '#0C0F14' },
   chatRowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingRight: 2 },
   chatName: { color: C.white, fontSize: 14, fontWeight: '800' },
   chatTime: { color: C.muted, fontSize: 10 },
@@ -610,7 +666,7 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', paddingHorizontal: 35, paddingTop: 65 },
   emptyIcon: { color: C.orange, fontSize: 36, marginBottom: 10 },
   emptyTitle: { color: C.white, fontSize: 17, fontWeight: '800', marginBottom: 7 },
-  bottomNav: { height: 66, borderTopWidth: 1, borderTopColor: C.line, backgroundColor: '#0D0D0D', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', paddingBottom: Platform.OS === 'android' ? 3 : 12 },
+  bottomNav: { height: 70, borderTopWidth: 1, borderTopColor: '#282E38', backgroundColor: '#0B0D11', flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', paddingBottom: Platform.OS === 'android' ? 3 : 12 },
   navItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, minHeight: 48 },
   navIcon: { color: '#777', fontSize: 19, fontWeight: '700' },
   navLabel: { color: '#777', fontSize: 9, fontWeight: '700' },
@@ -659,7 +715,7 @@ const styles = StyleSheet.create({
   voiceBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 175 },
   wave: { paddingVertical: 2 },
   messagePhoto: { width: 210, height: 190, borderRadius: 12, backgroundColor: '#282828' },
-  composer: { flexDirection: 'row', alignItems: 'flex-end', padding: 9, borderTopWidth: 1, borderTopColor: C.line, backgroundColor: '#101010', gap: 6 },
+  composer: { flexDirection: 'row', alignItems: 'flex-end', padding: 10, borderTopWidth: 1, borderTopColor: '#2A303A', backgroundColor: '#0C0F14', gap: 7 },
   composerIcon: { width: 36, height: 42, alignItems: 'center', justifyContent: 'center' },
   composerIconText: { color: C.orange, fontSize: 23 },
   composerInput: { flex: 1, maxHeight: 100, minHeight: 42, backgroundColor: C.panel2, borderRadius: 15, color: C.white, paddingHorizontal: 13, paddingTop: 10, paddingBottom: 8, fontSize: 14 },
@@ -670,7 +726,7 @@ const styles = StyleSheet.create({
   recordingBar: { flexDirection: 'row', gap: 8, alignItems: 'center', padding: 10, backgroundColor: '#21140D' },
   recordDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.red },
   modalShade: { flex: 1, backgroundColor: '#000B', justifyContent: 'center', padding: 22 },
-  modalCard: { backgroundColor: '#171717', borderRadius: 22, padding: 20, borderWidth: 1, borderColor: '#393939' },
+  modalCard: { backgroundColor: '#171B22', borderRadius: 25, padding: 22, borderWidth: 1, borderColor: '#343B47' },
   storyModal: { flex: 1, backgroundColor: '#050505', alignItems: 'center', justifyContent: 'center', padding: 20 },
   storyClose: { position: 'absolute', top: 45, right: 24, zIndex: 2 },
   storyImage: { width: '100%', height: '78%' },
