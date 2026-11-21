@@ -129,6 +129,7 @@ export default function App() {
   const [selectedChat, setSelectedChat] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [reactions, setReactions] = useState<{ message_id: string; user_id: string; emoji: string }[]>([]);
+  const [reactionTarget, setReactionTarget] = useState<Message | null>(null);
   const [draft, setDraft] = useState('');
   const [showStickers, setShowStickers] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
@@ -359,17 +360,14 @@ export default function App() {
     if (result.error) { Alert.alert('Reaction not saved', result.error.message); return; }
     setReactions(prev => existing ? prev.filter(r => !(r.message_id === messageId && r.user_id === user.id && r.emoji === emoji)) : [...prev, { message_id: messageId, user_id: user.id, emoji }]);
   };
-  const handleMessageLongPress = (message: Message) => {
-    const choices = ['🧡', '😂', '🔥', '👍', '😮', '😢'];
-    Alert.alert('Message actions', 'React to this message', [
-      ...choices.map(emoji => ({ text: emoji, onPress: () => toggleReaction(message.id, emoji) })),
-      ...(message.sender_id === user?.id ? [{ text: 'Delete message', style: 'destructive' as const, onPress: async () => {
-        const { error } = await supabase.from('messages').delete().eq('id', message.id).eq('sender_id', user!.id);
-        if (error) Alert.alert('Could not delete', error.message);
-        else { setMessages(prev => prev.filter(m => m.id !== message.id)); setReactions(prev => prev.filter(r => r.message_id !== message.id)); }
-      } }] : []),
-      { text: 'Cancel', style: 'cancel' as const }
-    ]);
+  const handleMessageLongPress = (message: Message) => setReactionTarget(message);
+  const deleteMessage = async () => {
+    if (!reactionTarget || !user || reactionTarget.sender_id !== user.id) return;
+    const targetId = reactionTarget.id;
+    const { error } = await supabase.from('messages').delete().eq('id', targetId).eq('sender_id', user.id);
+    if (error) Alert.alert('Could not delete', error.message);
+    else { setMessages(prev => prev.filter(m => m.id !== targetId)); setReactions(prev => prev.filter(r => r.message_id !== targetId)); }
+    setReactionTarget(null);
   };
 
   const sendText = () => { if (draft.trim()) send(draft); };
@@ -547,6 +545,16 @@ export default function App() {
         <Pressable onPress={startVoice} style={[styles.micButton, recording && { backgroundColor: C.red }]}><Text style={{ color: '#15100C', fontWeight: '900' }}>{recording ? '■' : '●'}</Text></Pressable>
         <Pressable onPress={sendText} style={styles.sendButton}><Text style={{ color: '#17100A', fontWeight: '900' }}>➤</Text></Pressable>
       </View>
+      <Modal visible={!!reactionTarget} transparent animationType="fade" onRequestClose={() => setReactionTarget(null)}>
+        <Pressable style={styles.modalShade} onPress={() => setReactionTarget(null)}>
+          <Pressable style={styles.reactionModal} onPress={() => {}}>
+            <Text style={styles.sectionTitle}>React to message</Text>
+            <View style={styles.reactionPicker}>{['🧡','😂','🔥','👍','😮','😢','🎉','✨'].map(emoji => <Pressable key={emoji} onPress={() => { if (reactionTarget) toggleReaction(reactionTarget.id, emoji); setReactionTarget(null); }} style={styles.reactionOption}><Text style={{ fontSize: 27 }}>{emoji}</Text></Pressable>)}</View>
+            {reactionTarget?.sender_id === user?.id && <Pressable onPress={deleteMessage} style={styles.deleteMessage}><Text style={{ color: C.red, fontWeight: '800' }}>Delete message</Text></Pressable>}
+            <Pressable onPress={() => setReactionTarget(null)} style={{ paddingVertical: 12, alignItems: 'center' }}><Text style={styles.muted}>CANCEL</Text></Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 
@@ -741,6 +749,10 @@ const styles = StyleSheet.create({
   messageText: { color: C.white, fontSize: 14, lineHeight: 20 },
   messageTime: { color: '#777', fontSize: 9, alignSelf: 'flex-end', marginTop: 4 },
   reactionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 },
+  reactionModal: { backgroundColor: '#171B22', borderRadius: 25, padding: 22, borderWidth: 1, borderColor: '#343B47' },
+  reactionPicker: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 9, marginTop: 18 },
+  reactionOption: { width: 54, height: 54, borderRadius: 17, backgroundColor: '#252B35', alignItems: 'center', justifyContent: 'center' },
+  deleteMessage: { marginTop: 18, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 16, alignItems: 'center' },
   reactionChip: { borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3, backgroundColor: '#2B2F38', borderWidth: 1, borderColor: '#414854' },
   reactionChipActive: { backgroundColor: '#4A2C1B', borderColor: C.orange },
   reactionText: { color: C.white, fontSize: 10, fontWeight: '700' },
