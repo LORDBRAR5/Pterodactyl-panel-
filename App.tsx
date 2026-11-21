@@ -74,8 +74,9 @@ function Avatar({ profile, size = 52, lite = false }: { profile?: Profile | null
     pulse.setValue(1);
   }, [profile?.animated_pfp, lite, pulse]);
   const frame = FRAMES.find(f => f.id === profile?.frame_id) || FRAMES[0];
+  const frameColor = profile?.frame_id && profile.frame_id !== 'none' ? frame.color : (profile?.accent_color || C.orange);
   return (
-    <Animated.View style={{ width: size, height: size, borderRadius: size, borderWidth: profile?.frame_id && profile.frame_id !== 'none' ? 2.5 : 1, borderColor: frame.color, padding: 2, transform: [{ scale: pulse }] }}>
+    <Animated.View style={{ width: size, height: size, borderRadius: size, borderWidth: profile?.frame_id && profile.frame_id !== 'none' ? 2.5 : 1, borderColor: frameColor, padding: 2, transform: [{ scale: pulse }] }}>
       <View style={{ flex: 1, borderRadius: size, overflow: 'hidden', backgroundColor: '#29231F', alignItems: 'center', justifyContent: 'center' }}>
         {profile?.avatar_url ? <Image source={{ uri: profile.avatar_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" fadeDuration={0} /> :
           <Text style={{ color: C.orange2, fontSize: size * 0.38, fontWeight: '800' }}>{initials(profile)}</Text>}
@@ -414,9 +415,10 @@ export default function App() {
     ping(); setSelectedChat(chat); setMessages([]);
   };
   const startDirect = async () => {
-    if (!searchUsername.trim() || !user) return;
+    const username = searchUsername.trim().replace(/^@+/, '').toLowerCase();
+    if (!username || !user) return Alert.alert('Username required', 'Enter the other person’s ORANGE username.');
     try {
-      const { data, error } = await supabase.rpc('start_direct_conversation', { p_username: searchUsername.trim().toLowerCase() });
+      const { data, error } = await supabase.rpc('start_direct_conversation', { p_username: username });
       if (error) throw error;
       const id = data as string;
       await loadData(user.id);
@@ -431,7 +433,7 @@ export default function App() {
   };
   const createGroup = async () => {
     if (!user || !groupTitle.trim()) return Alert.alert('Group name needed', 'Add a name for your group.');
-    const names = Array.from(new Set(groupUsernames.split(',').map(x => x.trim().toLowerCase()).filter(Boolean)));
+    const names = Array.from(new Set(groupUsernames.split(',').map(x => x.trim().replace(/^@+/, '').toLowerCase()).filter(Boolean)));
     if (!names.length) return Alert.alert('Add people', 'Enter usernames separated by commas.');
     try {
       const people = await supabase.from('profiles').select('id,username,display_name,avatar_url,accent_color,frame_id,animated_pfp').in('username', names);
