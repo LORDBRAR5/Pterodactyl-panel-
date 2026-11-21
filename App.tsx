@@ -757,7 +757,7 @@ export default function App() {
           {storyOwners.map(s => <Pressable key={s.id} onPress={() => openStory(s)} style={styles.storyItem}><View style={styles.storyRing}><Avatar profile={s.owner} size={58} lite={liteMode} /></View><Text style={styles.storyName}>{s.owner?.username}</Text></Pressable>)}
         </ScrollView>
         <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Recent Instants</Text></View>
-        {stories.map(s => <Pressable key={s.id} onPress={() => setStoryOpen(s)} style={styles.updateCard}>
+        {stories.map(s => <Pressable key={s.id} onPress={() => openStory(s)} style={styles.updateCard}>
           <Avatar profile={s.owner} size={42} lite={liteMode} /><View style={{ flex: 1, marginLeft: 12 }}><Text style={styles.chatName}>{s.owner?.display_name || s.owner?.username}</Text><Text style={styles.muted}>@{s.owner?.username} · {shortTime(s.expires_at)}</Text></View><Text style={styles.orangeLink}>VIEW</Text>
         </Pressable>)}
       </ScrollView>}
