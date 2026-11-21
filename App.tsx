@@ -270,6 +270,17 @@ export default function App() {
     return () => { active = false; supabase.removeChannel(channel); };
   }, [selectedChat?.id, user?.id]);
 
+  useEffect(() => {
+    if (!selectedChat || !messages.length) { setReactions([]); return; }
+    let active = true;
+    const ids = messages.map(message => message.id);
+    supabase.from('message_reactions').select('message_id,user_id,emoji').in('message_id', ids)
+      .then(({ data, error }) => {
+        if (active && !error) setReactions((data || []) as { message_id: string; user_id: string; emoji: string }[]);
+      });
+    return () => { active = false; };
+  }, [selectedChat?.id, messages]);
+
   const doAuth = async () => {
     if (!email.trim() || password.length < 8) return Alert.alert('Check your details', 'Enter a valid email and a password with at least 8 characters.');
     if (authMode === 'signup' && !/^[a-z0-9_]{3,20}$/.test(wantedUsername.trim().toLowerCase())) {
