@@ -2,17 +2,34 @@
   "expo": {
     "name": "ORANGE",
     "slug": "orange",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "android": {
       "package": "com.orange.social",
-      "versionCode": 3,
+      "versionCode": 4,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "RECORD_AUDIO",
         "CAMERA"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "orange",
+              "host": "auth",
+              "pathPrefix": "/callback"
+            }
+          ]
+        }
       ]
     },
     "plugins": [
@@ -34,7 +51,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Allow ORANGE to record voice notes.",
+          "microphonePermission": "Allow ORANGE to record and send voice notes.",
           "recordAudioAndroid": true,
           "enableBackgroundRecording": false,
           "enableBackgroundPlayback": false
@@ -48,6 +65,7 @@
           "microphonePermission": "Allow ORANGE to capture story videos."
         }
       ]
-    ]
+    ],
+    "scheme": "orange"
   }
 }
