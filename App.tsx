@@ -131,6 +131,7 @@ export default function App() {
   const [reactions, setReactions] = useState<{ message_id: string; user_id: string; emoji: string }[]>([]);
   const [reactionTarget, setReactionTarget] = useState<Message | null>(null);
   const [draft, setDraft] = useState('');
+  const [chatSearch, setChatSearch] = useState('');
   const [showStickers, setShowStickers] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
@@ -154,6 +155,11 @@ export default function App() {
   const recordStarted = useRef(0);
   const listRef = useRef<FlatList<Message>>(null);
   const user = session?.user;
+  const visibleConversations = useMemo(() => {
+    const query = chatSearch.trim().toLowerCase();
+    if (!query) return conversations;
+    return conversations.filter(chat => [chatTitle(chat), chat.last?.body || '', ...chat.members.map(member => member.username + ' ' + (member.display_name || ''))].join(' ').toLowerCase().includes(query));
+  }, [conversations, chatSearch]);
 
   const handleAuthUrl = useCallback(async (url: string) => {
     try {
@@ -616,7 +622,7 @@ export default function App() {
       </View>
 
       {tab === 'chats' && <>
-        <Pressable onPress={() => setNewChatOpen(true)} style={styles.searchPill}><Text style={{ color: C.muted, fontSize: 16 }}>⌕</Text><Text style={{ color: C.muted, marginLeft: 10 }}>Search people or start a conversation</Text></Pressable>
+        <View style={styles.searchPill}><Text style={{ color: C.muted, fontSize: 16 }}>⌕</Text><TextInput value={chatSearch} onChangeText={setChatSearch} placeholder="Search chats, people or messages" placeholderTextColor={C.muted} style={styles.searchInput} returnKeyType="search" clearButtonMode="while-editing" /></View>
         <View style={styles.storiesHeader}><Text style={styles.sectionTitle}>Instants</Text><Pressable onPress={addStory}><Text style={styles.orangeLink}>+ Add instant</Text></Pressable></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyStrip}>
           <Pressable onPress={addStory} style={styles.storyItem}><View style={styles.addStoryCircle}><Text style={{ color: C.orange, fontSize: 26 }}>＋</Text></View><Text style={styles.storyName}>Your story</Text></Pressable>
@@ -625,8 +631,8 @@ export default function App() {
           </Pressable>)}
         </ScrollView>
         <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Messages</Text><Text style={styles.muted}>{conversations.length} chats</Text></View>
-        <FlatList data={conversations} keyExtractor={c => c.id} contentContainerStyle={{ paddingBottom: 18 }}
-          ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyIcon}>✳</Text><Text style={styles.emptyTitle}>Your inbox is fresh</Text><Text style={styles.muted}>Start a private chat by username, or create a group.</Text><Action label="START A CHAT" onPress={() => setNewChatOpen(true)} /></View>}
+        <FlatList data={visibleConversations} keyExtractor={c => c.id} contentContainerStyle={{ paddingBottom: 18 }}
+          ListEmptyComponent={chatSearch.trim() ? <View style={styles.empty}><Text style={styles.emptyIcon}>⌕</Text><Text style={styles.emptyTitle}>No matching chats</Text><Text style={styles.muted}>Try another name or message.</Text></View> : <View style={styles.empty}><Text style={styles.emptyIcon}>✳</Text><Text style={styles.emptyTitle}>Your inbox is fresh</Text><Text style={styles.muted}>Start a private chat by username, or create a group.</Text><Action label="START A CHAT" onPress={() => setNewChatOpen(true)} /></View>}
           renderItem={({ item }) => {
             const other = chatAvatar(item);
             return <Pressable onPress={() => openChat(item)} style={({ pressed }) => [styles.chatRow, pressed && { backgroundColor: '#191919' }]}>
@@ -744,6 +750,7 @@ const styles = StyleSheet.create({
   topIcon: { width: 44, height: 44, borderRadius: 16, backgroundColor: '#191D25', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#303642' },
   topIconText: { color: C.orange, fontSize: 24, fontWeight: '500' },
   searchPill: { height: 48, borderRadius: 17, marginHorizontal: 18, backgroundColor: '#141820', borderWidth: 1, borderColor: '#2D333E', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, marginBottom: 18 },
+  searchInput: { flex: 1, color: C.white, fontSize: 13, paddingVertical: 0, paddingHorizontal: 10 },
   storiesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20 },
   orangeLink: { color: C.orange, fontSize: 12, fontWeight: '800' },
   storyStrip: { paddingHorizontal: 16, paddingTop: 13, paddingBottom: 18, gap: 14 },
