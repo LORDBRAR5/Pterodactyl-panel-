@@ -122,6 +122,7 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [booting, setBooting] = useState(true);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [stories, setStories] = useState<Story[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -207,10 +208,21 @@ export default function App() {
   }, [handleAuthUrl]);
 
   const loadData = useCallback(async (uid: string) => {
+    setProfileLoading(true);
     const profileRes = await supabase.from('profiles')
       .select('id,username,display_name,avatar_url,bio,accent_color,frame_id,animated_pfp,profile_effect,status_text')
       .eq('id', uid).maybeSingle();
-    if (profileRes.data) setProfile(profileRes.data as Profile);
+    if (profileRes.error) {
+      setProfileLoading(false);
+      throw profileRes.error;
+    }
+    if (!profileRes.data) {
+      setProfile(null);
+      setProfileLoading(false);
+      return;
+    }
+    setProfile(profileRes.data as Profile);
+    setProfileLoading(false);
 
     const memberRes = await supabase.from('conversation_members').select('conversation_id').eq('user_id', uid);
     const ids = (memberRes.data || []).map((x: any) => x.conversation_id);
@@ -245,19 +257,29 @@ export default function App() {
 
   useEffect(() => {
     let alive = true;
-    supabase.auth.getSession().then(({ data }) => {
-      if (alive) { setSession(data.session); setBooting(false); }
-    }).catch(() => setBooting(false));
+    const startupGuard = setTimeout(() => {
+      if (alive) setBooting(false);
+    }, 10000);
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!alive) return;
+      if (!error) setSession(data.session);
+      setBooting(false);
+      clearTimeout(startupGuard);
+    }).catch(() => {
+      if (alive) setBooting(false);
+      clearTimeout(startupGuard);
+    });
     const { data: listener } = supabase.auth.onAuthStateChange((event, next) => {
       setSession(next);
       if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true);
     });
-    return () => { alive = false; listener.subscription.unsubscribe(); };
+    return () => { alive = false; clearTimeout(startupGuard); listener.subscription.unsubscribe(); };
   }, []);
 
   useEffect(() => {
-    if (session?.user.id) loadData(session.user.id);
-    else { setProfile(null); setConversations([]); setStories([]); setNotes([]); }
+    if (session?.user.id) {
+      loadData(session.user.id).catch(error => Alert.alert('Could not load your account', error?.message || 'Check your connection and retry.'));
+    } else { setProfile(null); setProfileLoading(false); setConversations([]); setStories([]); setNotes([]); }
   }, [session?.user.id, loadData]);
 
   useEffect(() => {
@@ -526,7 +548,7 @@ export default function App() {
   }, [stories]);
 
   if (booting) return <View style={styles.center}><ActivityIndicator color={C.orange} size="large" /><Text style={styles.muted}>Opening ORANGE…</Text></View>;
-  if (!session || !profile) return (
+  if (!session) return (
     <View style={styles.authRoot}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <LinearGradient colors={['#24140A', C.bg, C.bg]} style={styles.authGlow}>
@@ -554,6 +576,16 @@ export default function App() {
           <Text style={styles.footnote}>Usernames are unique. Use a real email so you can verify and recover your account.</Text>
         </View>
       </LinearGradient>
+    </View>
+  );
+
+  if (session && !profile) return (
+    <View style={styles.center}>
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <ActivityIndicator color={C.orange} size="large" />
+      <Text style={styles.muted}>{profileLoading ? 'Loading your ORANGE profile…' : 'Your account is signed in, but its profile could not be loaded.'}</Text>
+      {!profileLoading && <Action label="RETRY" onPress={() => loadData(session.user.id).catch(error => Alert.alert('Profile unavailable', error?.message || 'Please try again.'))} />}
+      <Action label="SIGN OUT" quiet onPress={logout} />
     </View>
   );
 
