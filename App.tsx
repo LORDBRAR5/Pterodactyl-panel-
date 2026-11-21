@@ -158,15 +158,14 @@ export default function App() {
   const handleAuthUrl = useCallback(async (url: string) => {
     try {
       const parsed = new URL(url);
-      const errorDescription = parsed.searchParams.get('error_description');
-      const errorCode = parsed.searchParams.get('error');
-      if (errorDescription || errorCode) {
-        Alert.alert('Verification link issue', decodeURIComponent((errorDescription || errorCode || 'The link could not be verified.').replace(/\\+/g, ' ')));
-        return;
-      }
-      const code = parsed.searchParams.get('code');
-      const tokenHash = parsed.searchParams.get('token_hash');
-      const type = parsed.searchParams.get('type');
+      const hash = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+      const read = (key: string) => parsed.searchParams.get(key) ?? hash.get(key);
+      const errorDescription = read('error_description');
+      const errorCode = read('error_code') || read('error');
+      if (errorDescription || errorCode) throw new Error(errorDescription || errorCode || 'The link could not be verified.');
+      const code = read('code');
+      const tokenHash = read('token_hash');
+      const type = read('type');
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) throw error;
@@ -175,19 +174,18 @@ export default function App() {
         return;
       }
       if (tokenHash) {
-        const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: (type || 'signup') as any });
+        const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: (type || 'email') as any });
         if (error) throw error;
         if (type === 'recovery') setPasswordRecovery(true);
         else Alert.alert('Email verified', 'Your ORANGE account is ready.');
         return;
       }
-      const hash = new URLSearchParams(parsed.hash.replace(/^#/, ''));
-      const accessToken = hash.get('access_token');
-      const refreshToken = hash.get('refresh_token');
+      const accessToken = read('access_token');
+      const refreshToken = read('refresh_token');
       if (accessToken && refreshToken) {
         const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
         if (error) throw error;
-        if (hash.get('type') === 'recovery') setPasswordRecovery(true);
+        if (type === 'recovery') setPasswordRecovery(true);
         else Alert.alert('Email verified', 'Your ORANGE account is ready.');
       }
     } catch (e: any) {
@@ -313,6 +311,22 @@ export default function App() {
       Alert.alert('Reset link sent', 'Check your inbox for a password reset link.');
     } catch (e: any) { Alert.alert('Could not send reset link', e.message || 'Please try again.'); }
     finally { setAuthBusy(false); }
+  };
+
+  const resendVerification = async () => {
+    if (!email.trim()) return Alert.alert('Email required', 'Enter the email address you used to sign up.');
+    setAuthBusy(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: email.trim().toLowerCase(),
+        options: { emailRedirectTo: 'orange://auth/callback' }
+      });
+      if (error) throw error;
+      Alert.alert('Verification email sent', 'Open the newest email on this phone to finish creating your ORANGE account.');
+    } catch (e: any) {
+      Alert.alert('Could not resend email', e?.message || 'Wait a moment and try again.');
+    } finally { setAuthBusy(false); }
   };
 
   const saveNewPassword = async () => {
@@ -526,6 +540,7 @@ export default function App() {
           <Text style={styles.fieldLabel}>PASSWORD</Text>
           <TextInput value={password} onChangeText={setPassword} secureTextEntry placeholder="At least 8 characters" placeholderTextColor="#686868" style={styles.field} />
           <Action label={authBusy ? 'PLEASE WAIT…' : authMode === 'signup' ? 'CREATE ACCOUNT  →' : 'SIGN IN  →'} onPress={doAuth} />
+          {authMode === 'signup' && <Pressable onPress={resendVerification} disabled={authBusy} style={{ paddingTop: 13, alignItems: 'center' }}><Text style={{ color: C.orange2, fontSize: 12, fontWeight: '700' }}>Resend verification email</Text></Pressable>}
           {authMode === 'login' && <Pressable onPress={resetPassword} disabled={authBusy} style={{ paddingTop: 15, alignItems: 'center' }}><Text style={{ color: C.orange2, fontSize: 12, fontWeight: '700' }}>Forgot password?</Text></Pressable>}
           <Pressable onPress={() => setAuthMode(authMode === 'signup' ? 'login' : 'signup')} style={{ padding: 14, alignItems: 'center' }}>
             <Text style={styles.muted}>{authMode === 'signup' ? 'Already have an account? ' : 'New to ORANGE? '}<Text style={{ color: C.orange, fontWeight: '800' }}>{authMode === 'signup' ? 'Sign in' : 'Create account'}</Text></Text>
