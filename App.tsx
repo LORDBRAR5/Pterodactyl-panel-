@@ -138,6 +138,9 @@ export default function App() {
   const [wantedUsername, setWantedUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [groupOpen, setGroupOpen] = useState(false);
   const [searchUsername, setSearchUsername] = useState('');
@@ -167,13 +170,15 @@ export default function App() {
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) throw error;
-        Alert.alert('Email verified', 'Your ORANGE account is ready.');
+        if (type === 'recovery') setPasswordRecovery(true);
+        else Alert.alert('Email verified', 'Your ORANGE account is ready.');
         return;
       }
       if (tokenHash) {
         const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: (type || 'signup') as any });
         if (error) throw error;
-        Alert.alert('Email verified', 'Your ORANGE account is ready.');
+        if (type === 'recovery') setPasswordRecovery(true);
+        else Alert.alert('Email verified', 'Your ORANGE account is ready.');
         return;
       }
       const hash = new URLSearchParams(parsed.hash.replace(/^#/, ''));
@@ -182,7 +187,8 @@ export default function App() {
       if (accessToken && refreshToken) {
         const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
         if (error) throw error;
-        Alert.alert('Email verified', 'Your ORANGE account is ready.');
+        if (hash.get('type') === 'recovery') setPasswordRecovery(true);
+        else Alert.alert('Email verified', 'Your ORANGE account is ready.');
       }
     } catch (e: any) {
       Alert.alert('Could not verify email', e?.message || 'Open the newest verification email and try again.');
@@ -294,6 +300,19 @@ export default function App() {
       if (error) throw error;
       Alert.alert('Reset link sent', 'Check your inbox for a password reset link.');
     } catch (e: any) { Alert.alert('Could not send reset link', e.message || 'Please try again.'); }
+    finally { setAuthBusy(false); }
+  };
+
+  const saveNewPassword = async () => {
+    if (newPassword.length < 8) return Alert.alert('Password too short', 'Use at least 8 characters.');
+    if (newPassword !== confirmNewPassword) return Alert.alert('Passwords do not match', 'Enter the same password in both fields.');
+    setAuthBusy(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      setPasswordRecovery(false); setNewPassword(''); setConfirmNewPassword('');
+      Alert.alert('Password updated', 'Your password has been changed.');
+    } catch (e: any) { Alert.alert('Could not update password', e.message || 'Please try again.'); }
     finally { setAuthBusy(false); }
   };
 
@@ -570,7 +589,7 @@ export default function App() {
       </View>
 
       {tab === 'chats' && <>
-        <View style={styles.searchPill}><Text style={{ color: C.muted, fontSize: 16 }}>⌕</Text><Text style={{ color: C.muted, marginLeft: 10 }}>Search conversations or start with a username</Text></View>
+        <Pressable onPress={() => setNewChatOpen(true)} style={styles.searchPill}><Text style={{ color: C.muted, fontSize: 16 }}>⌕</Text><Text style={{ color: C.muted, marginLeft: 10 }}>Search people or start a conversation</Text></Pressable>
         <View style={styles.storiesHeader}><Text style={styles.sectionTitle}>Instants</Text><Pressable onPress={addStory}><Text style={styles.orangeLink}>+ Add instant</Text></Pressable></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyStrip}>
           <Pressable onPress={addStory} style={styles.storyItem}><View style={styles.addStoryCircle}><Text style={{ color: C.orange, fontSize: 26 }}>＋</Text></View><Text style={styles.storyName}>Your story</Text></Pressable>
@@ -630,6 +649,8 @@ export default function App() {
           <TextInput defaultValue={profile.display_name || ''} onEndEditing={e => updateProfile({ display_name: e.nativeEvent.text })} placeholder="Display name" placeholderTextColor="#777" style={styles.field} maxLength={40} />
           <Text style={styles.fieldLabel}>BIO</Text>
           <TextInput defaultValue={profile.bio || ''} onEndEditing={e => updateProfile({ bio: e.nativeEvent.text })} placeholder="A little about you" placeholderTextColor="#777" style={styles.field} maxLength={120} />
+          <Text style={styles.fieldLabel}>STATUS</Text>
+          <TextInput defaultValue={profile.status_text || ''} onEndEditing={e => updateProfile({ status_text: e.nativeEvent.text })} placeholder="Set a short status" placeholderTextColor="#777" style={styles.field} maxLength={60} />
           <Text style={styles.fieldLabel}>PROFILE FRAME</Text>
           <View style={styles.frameRow}>{FRAMES.map(f => <Pressable key={f.id} onPress={() => updateProfile({ frame_id: f.id })} style={[styles.frameChoice, { borderColor: f.color, borderWidth: profile.frame_id === f.id ? 3 : 1 }]}><View style={[styles.frameDot, { backgroundColor: f.color }]} /><Text style={styles.frameLabel}>{f.label}</Text></Pressable>)}</View>
           <View style={styles.settingRow}><View style={{ flex: 1 }}><Text style={styles.settingTitle}>Animated profile ring</Text><Text style={styles.muted}>Subtle motion around your photo</Text></View><Switch value={!!profile.animated_pfp} onValueChange={v => updateProfile({ animated_pfp: v })} trackColor={{ false: '#383838', true: C.orange }} thumbColor="#fff" /></View>
@@ -656,6 +677,16 @@ export default function App() {
       </Modal>
       <Modal visible={!!storyOpen} transparent animationType="fade" onRequestClose={() => setStoryOpen(null)}>
         <View style={styles.storyModal}><Pressable onPress={() => setStoryOpen(null)} style={styles.storyClose}><Text style={{ color: '#fff', fontSize: 24 }}>×</Text></Pressable>{storyOpen?.media_url ? <Image source={{ uri: storyOpen.media_url }} style={styles.storyImage} resizeMode="contain" /> : null}<Text style={styles.storyCaption}>{storyOpen?.caption || ('@' + (storyOpen?.owner?.username || ''))}</Text></View>
+      </Modal>
+      <Modal visible={passwordRecovery} transparent animationType="fade" onRequestClose={() => setPasswordRecovery(false)}>
+        <View style={styles.modalShade}><View style={styles.modalCard}>
+          <Text style={styles.sectionTitle}>Choose a new password</Text>
+          <Text style={styles.muted}>Use at least 8 characters to secure your account.</Text>
+          <TextInput value={newPassword} onChangeText={setNewPassword} secureTextEntry placeholder="New password" placeholderTextColor="#777" style={styles.field} />
+          <TextInput value={confirmNewPassword} onChangeText={setConfirmNewPassword} secureTextEntry placeholder="Confirm new password" placeholderTextColor="#777" style={styles.field} />
+          <Action label={authBusy ? 'PLEASE WAIT…' : 'UPDATE PASSWORD'} onPress={saveNewPassword} />
+          <Action label="CANCEL" quiet onPress={() => setPasswordRecovery(false)} />
+        </View></View>
       </Modal>
     </View>
   );
