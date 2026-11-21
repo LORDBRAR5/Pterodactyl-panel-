@@ -128,6 +128,7 @@ export default function App() {
   const [tab, setTab] = useState<'chats' | 'updates' | 'notes' | 'profile'>('chats');
   const [selectedChat, setSelectedChat] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [reactions, setReactions] = useState<{ message_id: string; user_id: string; emoji: string }[]>([]);
   const [draft, setDraft] = useState('');
   const [showStickers, setShowStickers] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
@@ -349,6 +350,28 @@ export default function App() {
     setDraft('');
     loadData(user.id);
   };
+  const toggleReaction = async (messageId: string, emoji: string) => {
+    if (!user) return;
+    const existing = reactions.find(r => r.message_id === messageId && r.user_id === user.id && r.emoji === emoji);
+    const result = existing
+      ? await supabase.from('message_reactions').delete().eq('message_id', messageId).eq('user_id', user.id).eq('emoji', emoji)
+      : await supabase.from('message_reactions').insert({ message_id: messageId, user_id: user.id, emoji });
+    if (result.error) { Alert.alert('Reaction not saved', result.error.message); return; }
+    setReactions(prev => existing ? prev.filter(r => !(r.message_id === messageId && r.user_id === user.id && r.emoji === emoji)) : [...prev, { message_id: messageId, user_id: user.id, emoji }]);
+  };
+  const handleMessageLongPress = (message: Message) => {
+    const choices = ['🧡', '😂', '🔥', '👍', '😮', '😢'];
+    Alert.alert('Message actions', 'React to this message', [
+      ...choices.map(emoji => ({ text: emoji, onPress: () => toggleReaction(message.id, emoji) })),
+      ...(message.sender_id === user?.id ? [{ text: 'Delete message', style: 'destructive' as const, onPress: async () => {
+        const { error } = await supabase.from('messages').delete().eq('id', message.id).eq('sender_id', user!.id);
+        if (error) Alert.alert('Could not delete', error.message);
+        else { setMessages(prev => prev.filter(m => m.id !== message.id)); setReactions(prev => prev.filter(r => r.message_id !== message.id)); }
+      } }] : []),
+      { text: 'Cancel', style: 'cancel' as const }
+    ]);
+  };
+
   const sendText = () => { if (draft.trim()) send(draft); };
   const sendSticker = (sticker: string) => { setShowStickers(false); send(sticker, 'sticker'); };
   const startVoice = async () => {
@@ -501,13 +524,18 @@ export default function App() {
         renderItem={({ item }) => {
           const mine = item.sender_id === user?.id;
           return <View style={[styles.messageRow, mine ? { justifyContent: 'flex-end' } : { justifyContent: 'flex-start' }]}>
-            <View style={[styles.messageBubble, mine ? styles.myBubble : styles.theirBubble]}>
+            <Pressable onLongPress={() => handleMessageLongPress(item)} delayLongPress={350} style={[styles.messageBubble, mine ? styles.myBubble : styles.theirBubble]}>
               {item.message_type === 'sticker' ? <Text style={{ fontSize: 42 }}>{item.body}</Text> :
                item.message_type === 'audio' && item.media_path ? <VoiceBubble path={item.media_path} mine={mine} /> :
                item.message_type === 'image' && item.media_path ? <PhotoBubble path={item.media_path} /> :
                <Text style={[styles.messageText, mine && { color: '#21150C' }]}>{item.body}</Text>}
               <Text style={[styles.messageTime, mine && { color: '#775638' }]}>{shortTime(item.created_at)}</Text>
-            </View>
+              {reactions.some(r => r.message_id === item.id) && <View style={styles.reactionRow}>{Array.from(new Set(reactions.filter(r => r.message_id === item.id).map(r => r.emoji))).map(emoji => {
+                const group = reactions.filter(r => r.message_id === item.id && r.emoji === emoji);
+                const active = group.some(r => r.user_id === user?.id);
+                return <Pressable key={emoji} onPress={() => toggleReaction(item.id, emoji)} style={[styles.reactionChip, active && styles.reactionChipActive]}><Text style={styles.reactionText}>{emoji} {group.length}</Text></Pressable>;
+              })}</View>}
+            </Pressable>
           </View>;
         }} />
       {showStickers && <View style={styles.stickerTray}>{STICKERS.map(s => <Pressable key={s} onPress={() => sendSticker(s)} style={styles.sticker}><Text style={{ fontSize: 26 }}>{s}</Text></Pressable>)}</View>}
@@ -712,6 +740,10 @@ const styles = StyleSheet.create({
   theirBubble: { backgroundColor: '#202020', borderWidth: 1, borderColor: '#303030', borderBottomLeftRadius: 5 },
   messageText: { color: C.white, fontSize: 14, lineHeight: 20 },
   messageTime: { color: '#777', fontSize: 9, alignSelf: 'flex-end', marginTop: 4 },
+  reactionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 },
+  reactionChip: { borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3, backgroundColor: '#2B2F38', borderWidth: 1, borderColor: '#414854' },
+  reactionChipActive: { backgroundColor: '#4A2C1B', borderColor: C.orange },
+  reactionText: { color: C.white, fontSize: 10, fontWeight: '700' },
   voiceBubble: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 175 },
   wave: { paddingVertical: 2 },
   messagePhoto: { width: 210, height: 190, borderRadius: 12, backgroundColor: '#282828' },
