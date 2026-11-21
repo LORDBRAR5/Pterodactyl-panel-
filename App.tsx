@@ -244,8 +244,9 @@ export default function App() {
     supabase.auth.getSession().then(({ data }) => {
       if (alive) { setSession(data.session); setBooting(false); }
     }).catch(() => setBooting(false));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, next) => {
       setSession(next);
+      if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true);
     });
     return () => { alive = false; listener.subscription.unsubscribe(); };
   }, []);
