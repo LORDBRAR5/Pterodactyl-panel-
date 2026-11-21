@@ -2,13 +2,13 @@
   "expo": {
     "name": "ORANGE",
     "slug": "orange",
-    "version": "2.1.1",
+    "version": "2.1.2",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "android": {
       "package": "com.orange.social",
-      "versionCode": 5,
+      "versionCode": 6,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "RECORD_AUDIO",
