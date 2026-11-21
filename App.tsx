@@ -19,6 +19,7 @@ const C = {
   muted: '#9298A4', green: '#55D6A0', red: '#FF6666'
 };
 const STICKERS = ['🧡','😂','🥹','🔥','✨','😎','🫶','🤍','💀','🥳','🌙','🐈','🍊','💯','👀','🎉'];
+const ACCENTS = ['#FF842B','#FF5E62','#E9C46A','#78DCE8','#B58CFF','#55D6A0','#F472B6','#F7F8FA'];
 const FRAMES = [
   { id: 'none', label: 'Classic', color: '#FF7A18' },
   { id: 'sunset', label: 'Sunset', color: '#FF5E62' },
@@ -152,6 +153,11 @@ export default function App() {
   const [liteMode, setLiteMode] = useState(Platform.OS === 'android' && Dimensions.get('window').width <= 360);
   const [recording, setRecording] = useState(false);
   const [storyOpen, setStoryOpen] = useState<Story | null>(null);
+  const [storyAsset, setStoryAsset] = useState<any>(null);
+  const [storyCaption, setStoryCaption] = useState('');
+  const [storyComposerOpen, setStoryComposerOpen] = useState(false);
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [editDraft, setEditDraft] = useState('');
   const recorder = useAudioRecorder(RecordingPresets.LOW_QUALITY);
   const recordStarted = useRef(0);
   const listRef = useRef<FlatList<Message>>(null);
@@ -290,9 +296,18 @@ export default function App() {
     supabase.from('conversation_members').update({ last_read_at: new Date().toISOString() })
       .eq('conversation_id', selectedChat.id).eq('user_id', user.id).then(() => {});
     const channel = supabase.channel('orange-chat-' + selectedChat.id)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: 'conversation_id=eq.' + selectedChat.id }, (payload) => {
-        const incoming = payload.new as Message;
-        setMessages(prev => prev.some(m => m.id === incoming.id) ? prev : [...prev, incoming]);
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: 'conversation_id=eq.' + selectedChat.id }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const incoming = payload.new as Message;
+          setMessages(prev => prev.some(m => m.id === incoming.id) ? prev : [...prev, incoming]);
+        } else if (payload.eventType === 'UPDATE') {
+          const changed = payload.new as Message;
+          setMessages(prev => prev.map(m => m.id === changed.id ? changed : m));
+        } else if (payload.eventType === 'DELETE') {
+          const removed = payload.old as Message;
+          setMessages(prev => prev.filter(m => m.id !== removed.id));
+          setReactions(prev => prev.filter(r => r.message_id !== removed.id));
+        }
       }).subscribe();
     return () => { active = false; supabase.removeChannel(channel); };
   }, [selectedChat?.id, user?.id]);
@@ -434,6 +449,16 @@ export default function App() {
     setReactions(prev => existing ? prev.filter(r => !(r.message_id === messageId && r.user_id === user.id && r.emoji === emoji)) : [...prev, { message_id: messageId, user_id: user.id, emoji }]);
   };
   const handleMessageLongPress = (message: Message) => setReactionTarget(message);
+  const saveMessageEdit = async () => {
+    if (!editingMessage || !user || editingMessage.sender_id !== user.id) return;
+    const body = editDraft.trim();
+    if (!body) return Alert.alert('Message is empty', 'Enter some text before saving.');
+    const { data, error } = await supabase.from('messages').update({ body, edited_at: new Date().toISOString() })
+      .eq('id', editingMessage.id).eq('sender_id', user.id).select('*').single();
+    if (error) return Alert.alert('Could not edit message', error.message);
+    setMessages(prev => prev.map(m => m.id === data.id ? data as Message : m));
+    setEditingMessage(null); setEditDraft('');
+  };
   const deleteMessage = async () => {
     if (!reactionTarget || !user || reactionTarget.sender_id !== user.id) return;
     const targetId = reactionTarget.id;
@@ -450,11 +475,13 @@ export default function App() {
       try {
         await recorder.stop();
         setRecording(false);
+        await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false });
         const uri = recorder.uri;
         if (!uri || !user || !selectedChat) return;
         const blob = await fetch(uri).then(r => r.blob());
-        const path = selectedChat.id + '/' + user.id + '/' + Date.now() + '.3gp';
-        const up = await supabase.storage.from('orange-chat-media').upload(path, blob, { contentType: 'audio/3gpp', upsert: false });
+        const isM4a = uri.toLowerCase().endsWith('.m4a');
+        const path = selectedChat.id + '/' + user.id + '/' + Date.now() + (isM4a ? '.m4a' : '.3gp');
+        const up = await supabase.storage.from('orange-chat-media').upload(path, blob, { contentType: isM4a ? 'audio/mp4' : 'audio/3gpp', upsert: false });
         if (up.error) throw up.error;
         const seconds = Math.max(1, Math.round((Date.now() - recordStarted.current) / 1000));
         await send('Voice message', 'audio', path, seconds);
@@ -487,22 +514,36 @@ export default function App() {
   };
   const addStory = async () => {
     if (!user) return;
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: liteMode ? 0.5 : 0.78 });
-    if (result.canceled || !result.assets[0]) return;
     try {
-      const asset = result.assets[0];
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: liteMode ? 0.5 : 0.78 });
+      if (result.canceled || !result.assets[0]) return;
+      setStoryAsset(result.assets[0]); setStoryCaption(''); setStoryComposerOpen(true);
+    } catch (e: any) { Alert.alert('Could not open photos', e?.message || 'Please try again.'); }
+  };
+  const publishStory = async () => {
+    if (!user || !storyAsset) return;
+    try {
+      const asset = storyAsset;
       const blob = await fetch(asset.uri).then(r => r.blob());
       const mime = asset.mimeType || 'image/jpeg';
-      const ext = mime.includes('png') ? 'png' : 'jpg';
+      const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
       const path = user.id + '/instants/' + Date.now() + '.' + ext;
       const up = await supabase.storage.from('orange-profile-media').upload(path, blob, { contentType: mime, upsert: false });
       if (up.error) throw up.error;
       const url = supabase.storage.from('orange-profile-media').getPublicUrl(path).data.publicUrl;
-      const ins = await supabase.from('stories').insert({ user_id: user.id, media_url: url, media_type: 'image' });
+      const ins = await supabase.from('stories').insert({ user_id: user.id, media_url: url, media_type: 'image', caption: storyCaption.trim().slice(0, 160) });
       if (ins.error) throw ins.error;
+      setStoryComposerOpen(false); setStoryAsset(null); setStoryCaption('');
       await loadData(user.id);
       Alert.alert('Instant posted', 'Your Instant will disappear after 24 hours.');
     } catch (e: any) { Alert.alert('Could not post', e.message || 'Try again.'); }
+  };
+  const openStory = async (story: Story) => {
+    setStoryOpen(story);
+    if (user && story.user_id !== user.id) {
+      const { error } = await supabase.from('story_views').insert({ story_id: story.id, viewer_id: user.id });
+      if (error && !/duplicate|unique/i.test(error.message)) console.warn('Story view was not recorded:', error.message);
+    }
   };
   const saveNote = async () => {
     if (!user || !noteDraft.trim()) return;
@@ -611,7 +652,7 @@ export default function App() {
                item.message_type === 'audio' && item.media_path ? <VoiceBubble path={item.media_path} mine={mine} /> :
                item.message_type === 'image' && item.media_path ? <PhotoBubble path={item.media_path} /> :
                <Text style={[styles.messageText, mine && { color: '#21150C' }]}>{item.body}</Text>}
-              <Text style={[styles.messageTime, mine && { color: '#775638' }]}>{shortTime(item.created_at)}</Text>
+              <Text style={[styles.messageTime, mine && { color: '#775638' }]}>{shortTime(item.created_at)}{item.edited_at ? ' · edited' : ''}</Text>
               {reactions.some(r => r.message_id === item.id) && <View style={styles.reactionRow}>{Array.from(new Set(reactions.filter(r => r.message_id === item.id).map(r => r.emoji))).map(emoji => {
                 const group = reactions.filter(r => r.message_id === item.id && r.emoji === emoji);
                 const active = group.some(r => r.user_id === user?.id);
@@ -634,10 +675,14 @@ export default function App() {
           <Pressable style={styles.reactionModal} onPress={() => {}}>
             <Text style={styles.sectionTitle}>React to message</Text>
             <View style={styles.reactionPicker}>{['🧡','😂','🔥','👍','😮','😢','🎉','✨'].map(emoji => <Pressable key={emoji} onPress={() => { if (reactionTarget) toggleReaction(reactionTarget.id, emoji); setReactionTarget(null); }} style={styles.reactionOption}><Text style={{ fontSize: 27 }}>{emoji}</Text></Pressable>)}</View>
+            {reactionTarget?.sender_id === user?.id && reactionTarget.message_type === 'text' && <Pressable onPress={() => { setEditingMessage(reactionTarget); setEditDraft(reactionTarget.body); setReactionTarget(null); }} style={styles.deleteMessage}><Text style={{ color: C.orange, fontWeight: '800' }}>Edit message</Text></Pressable>}
             {reactionTarget?.sender_id === user?.id && <Pressable onPress={deleteMessage} style={styles.deleteMessage}><Text style={{ color: C.red, fontWeight: '800' }}>Delete message</Text></Pressable>}
             <Pressable onPress={() => setReactionTarget(null)} style={{ paddingVertical: 12, alignItems: 'center' }}><Text style={styles.muted}>CANCEL</Text></Pressable>
           </Pressable>
         </Pressable>
+      </Modal>
+      <Modal visible={!!editingMessage} transparent animationType="fade" onRequestClose={() => setEditingMessage(null)}>
+        <View style={styles.modalShade}><View style={styles.modalCard}><Text style={styles.sectionTitle}>Edit message</Text><TextInput value={editDraft} onChangeText={setEditDraft} multiline maxLength={5000} style={[styles.field, { marginTop: 14, minHeight: 90 }]} placeholder="Message" placeholderTextColor="#777" /><Action label="SAVE CHANGES" onPress={saveMessageEdit} /><Action label="CANCEL" quiet onPress={() => setEditingMessage(null)} /></View></View>
       </Modal>
     </KeyboardAvoidingView>
   );
@@ -658,7 +703,7 @@ export default function App() {
         <View style={styles.storiesHeader}><Text style={styles.sectionTitle}>Instants</Text><Pressable onPress={addStory}><Text style={styles.orangeLink}>+ Add instant</Text></Pressable></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyStrip}>
           <Pressable onPress={addStory} style={styles.storyItem}><View style={styles.addStoryCircle}><Text style={{ color: C.orange, fontSize: 26 }}>＋</Text></View><Text style={styles.storyName}>Your story</Text></Pressable>
-          {storyOwners.map(s => <Pressable key={s.id} onPress={() => setStoryOpen(s)} style={styles.storyItem}>
+          {storyOwners.map(s => <Pressable key={s.id} onPress={() => openStory(s)} style={styles.storyItem}>
             <View style={styles.storyRing}><Avatar profile={s.owner} size={58} lite={liteMode} /></View><Text style={styles.storyName} numberOfLines={1}>{s.owner?.display_name || s.owner?.username || 'Member'}</Text>
           </Pressable>)}
         </ScrollView>
@@ -682,7 +727,7 @@ export default function App() {
         <Text style={styles.muted}>Photos that disappear after 24 hours.</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storyStrip}>
           <Pressable onPress={addStory} style={styles.storyItem}><View style={styles.addStoryCircle}><Text style={{ color: C.orange, fontSize: 26 }}>＋</Text></View><Text style={styles.storyName}>Add instant</Text></Pressable>
-          {storyOwners.map(s => <Pressable key={s.id} onPress={() => setStoryOpen(s)} style={styles.storyItem}><View style={styles.storyRing}><Avatar profile={s.owner} size={58} lite={liteMode} /></View><Text style={styles.storyName}>{s.owner?.username}</Text></Pressable>)}
+          {storyOwners.map(s => <Pressable key={s.id} onPress={() => openStory(s)} style={styles.storyItem}><View style={styles.storyRing}><Avatar profile={s.owner} size={58} lite={liteMode} /></View><Text style={styles.storyName}>{s.owner?.username}</Text></Pressable>)}
         </ScrollView>
         <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Recent Instants</Text></View>
         {stories.map(s => <Pressable key={s.id} onPress={() => setStoryOpen(s)} style={styles.updateCard}>
@@ -704,7 +749,7 @@ export default function App() {
         <View style={styles.profileHero}>
           <Pressable onPress={uploadAvatar}><Avatar profile={profile} size={94} lite={liteMode} /><Text style={styles.editAvatar}>EDIT</Text></Pressable>
           <Text style={styles.profileName}>{profile.display_name || profile.username}</Text>
-          <Text style={styles.profileHandle}>@{profile.username}</Text>
+          <Text style={[styles.profileHandle, { color: profile.accent_color || C.orange }]}>@{profile.username}</Text>
           <Text style={styles.profileBio}>{profile.bio || 'Make this space yours.'}</Text>
           <Text style={styles.profileMail}>{user?.email}</Text>
         </View>
@@ -716,6 +761,8 @@ export default function App() {
           <TextInput defaultValue={profile.bio || ''} onEndEditing={e => updateProfile({ bio: e.nativeEvent.text })} placeholder="A little about you" placeholderTextColor="#777" style={styles.field} maxLength={120} />
           <Text style={styles.fieldLabel}>STATUS</Text>
           <TextInput defaultValue={profile.status_text || ''} onEndEditing={e => updateProfile({ status_text: e.nativeEvent.text })} placeholder="Set a short status" placeholderTextColor="#777" style={styles.field} maxLength={60} />
+          <Text style={styles.fieldLabel}>ACCENT COLOUR</Text>
+          <View style={styles.frameRow}>{ACCENTS.map(color => <Pressable key={color} onPress={() => updateProfile({ accent_color: color })} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: color, borderWidth: profile.accent_color === color ? 3 : 1, borderColor: C.white, marginRight: 7, marginBottom: 7 }} />)}</View>
           <Text style={styles.fieldLabel}>PROFILE FRAME</Text>
           <View style={styles.frameRow}>{FRAMES.map(f => <Pressable key={f.id} onPress={() => updateProfile({ frame_id: f.id })} style={[styles.frameChoice, { borderColor: f.color, borderWidth: profile.frame_id === f.id ? 3 : 1 }]}><View style={[styles.frameDot, { backgroundColor: f.color }]} /><Text style={styles.frameLabel}>{f.label}</Text></Pressable>)}</View>
           <View style={styles.settingRow}><View style={{ flex: 1 }}><Text style={styles.settingTitle}>Animated profile ring</Text><Text style={styles.muted}>Subtle motion around your photo</Text></View><Switch value={!!profile.animated_pfp} onValueChange={v => updateProfile({ animated_pfp: v })} trackColor={{ false: '#383838', true: C.orange }} thumbColor="#fff" /></View>
@@ -741,7 +788,10 @@ export default function App() {
         <View style={styles.modalShade}><View style={styles.modalCard}><Text style={styles.sectionTitle}>Create a group</Text><TextInput value={groupTitle} onChangeText={setGroupTitle} placeholder="Group name" placeholderTextColor="#777" style={styles.field} /><TextInput value={groupUsernames} onChangeText={setGroupUsernames} autoCapitalize="none" placeholder="user_one, user_two" placeholderTextColor="#777" style={styles.field} /><Text style={styles.footnote}>Add usernames separated by commas. You will be the group owner.</Text><Action label="CREATE GROUP" onPress={createGroup} /><Action label="CANCEL" quiet onPress={() => setGroupOpen(false)} /></View></View>
       </Modal>
       <Modal visible={!!storyOpen} transparent animationType="fade" onRequestClose={() => setStoryOpen(null)}>
-        <View style={styles.storyModal}><Pressable onPress={() => setStoryOpen(null)} style={styles.storyClose}><Text style={{ color: '#fff', fontSize: 24 }}>×</Text></Pressable>{storyOpen?.media_url ? <Image source={{ uri: storyOpen.media_url }} style={styles.storyImage} resizeMode="contain" /> : null}<Text style={styles.storyCaption}>{storyOpen?.caption || ('@' + (storyOpen?.owner?.username || ''))}</Text></View>
+        <View style={styles.storyModal}><Pressable onPress={() => setStoryOpen(null)} style={styles.storyClose}><Text style={{ color: '#fff', fontSize: 24 }}>×</Text></Pressable>{storyOpen?.media_url ? <Image source={{ uri: storyOpen.media_url }} style={styles.storyImage} resizeMode="contain" /> : null}<Text style={styles.storyCaption}>{storyOpen?.caption || ('@' + (storyOpen?.owner?.username || ''))}</Text>{storyOpen?.user_id === user?.id && <Pressable onPress={async () => { const current = storyOpen; if (!current) return; const { error } = await supabase.from('stories').delete().eq('id', current.id).eq('user_id', user.id); if (error) Alert.alert('Could not delete Instant', error.message); else { setStories(prev => prev.filter(x => x.id !== current.id)); setStoryOpen(null); } }} style={{ marginTop: 18, padding: 12 }}><Text style={{ color: C.red, fontWeight: '800' }}>DELETE INSTANT</Text></Pressable>}</View>
+      </Modal>
+      <Modal visible={storyComposerOpen} transparent animationType="fade" onRequestClose={() => { setStoryComposerOpen(false); setStoryAsset(null); }}>
+        <View style={styles.modalShade}><View style={styles.modalCard}><Text style={styles.sectionTitle}>Post an Instant</Text>{storyAsset?.uri ? <Image source={{ uri: storyAsset.uri }} style={{ width: '100%', height: 180, borderRadius: 14, marginTop: 14 }} resizeMode="cover" /> : null}<TextInput value={storyCaption} onChangeText={setStoryCaption} placeholder="Add a caption (optional)" placeholderTextColor="#777" style={[styles.field, { marginTop: 14 }]} maxLength={160} /><Action label="POST INSTANT" onPress={publishStory} /><Action label="CANCEL" quiet onPress={() => { setStoryComposerOpen(false); setStoryAsset(null); }} /></View></View>
       </Modal>
       <Modal visible={passwordRecovery} transparent animationType="fade" onRequestClose={() => setPasswordRecovery(false)}>
         <View style={styles.modalShade}><View style={styles.modalCard}>
